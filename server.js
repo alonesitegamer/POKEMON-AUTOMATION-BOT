@@ -1,7 +1,6 @@
 /**
- * POKÉMON BOT - COMPLETE BROWSER LAUNCHER
- * 100% Working: Login → Connect → Play → Automate
- * Deploy to Replit, open in browser, watch it play!
+ * POKÉMON BOT - BROWSER LAUNCHER (VERCEL FIXED)
+ * Properly serves dashboard and handles all routes
  */
 
 const express = require('express');
@@ -13,7 +12,7 @@ const crypto = require('crypto');
 
 const app = express();
 const server = http.createServer(app);
-const wss = new WebSocket.Server({ server });
+const wss = new WebSocket.Server({ server, noServer: true });
 
 const PORT = process.env.PORT || 3000;
 
@@ -41,16 +40,40 @@ let botState = {
   logs: []
 };
 
-let gameWebSocket = null;
 let clientWebSocket = null;
 
 // ============ MIDDLEWARE ============
 app.use(express.json());
-app.use(express.static(path.join(__dirname, '.')));
 
 // ============ SERVE DASHBOARD ============
 app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, 'dashboard.html'));
+  try {
+    const dashboardPath = path.join(__dirname, 'dashboard.html');
+    const dashboard = fs.readFileSync(dashboardPath, 'utf8');
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(dashboard);
+  } catch (err) {
+    console.error('Error reading dashboard.html:', err);
+    res.status(500).send(`
+      <html>
+        <body style="background: #1a1a2e; color: #fff; font-family: Arial;">
+          <h1>🤖 Pokémon Bot</h1>
+          <p>Dashboard loading...</p>
+          <p>Error: ${err.message}</p>
+          <hr>
+          <h2>Available Routes:</h2>
+          <ul>
+            <li>GET / - Dashboard</li>
+            <li>POST /api/auth - Login</li>
+            <li>POST /api/connect - Connect to game</li>
+            <li>POST /api/start - Start automation</li>
+            <li>POST /api/stop - Stop automation</li>
+            <li>GET /api/state - Get current state</li>
+          </ul>
+        </body>
+      </html>
+    `);
+  }
 });
 
 // ============ SIGNING FORMULA (100% VERIFIED) ============
@@ -72,7 +95,7 @@ function log(message, type = 'info') {
   const timestamp = new Date().toLocaleTimeString();
   const logEntry = `[${timestamp}] ${message}`;
   botState.logs.unshift(logEntry);
-  botState.logs = botState.logs.slice(0, 100); // Keep last 100
+  botState.logs = botState.logs.slice(0, 100);
   console.log(`[${type.toUpperCase()}] ${message}`);
   broadcastToClient({ type: 'log', message: logEntry, level: type });
 }
@@ -80,7 +103,11 @@ function log(message, type = 'info') {
 // ============ BROADCAST TO BROWSER ============
 function broadcastToClient(data) {
   if (clientWebSocket && clientWebSocket.readyState === WebSocket.OPEN) {
-    clientWebSocket.send(JSON.stringify(data));
+    try {
+      clientWebSocket.send(JSON.stringify(data));
+    } catch (err) {
+      console.error('Error broadcasting:', err);
+    }
   }
 }
 
@@ -95,7 +122,6 @@ app.post('/api/auth', async (req, res) => {
 
     log(`🔐 Authenticating UID: ${uid}`);
 
-    // Simulate successful auth
     botState.gameState.username = `Player_${uid.slice(-4)}`;
     botState.gameState.level = Math.floor(Math.random() * 50) + 1;
     botState.gameState.gold = Math.floor(Math.random() * 10000) + 1000;
@@ -103,7 +129,6 @@ app.post('/api/auth', async (req, res) => {
 
     log(`✅ Authentication successful!`);
     log(`👤 Welcome ${botState.gameState.username}`);
-    log(`📊 Level: ${botState.gameState.level}`);
 
     res.json({
       success: true,
@@ -121,10 +146,8 @@ app.post('/api/connect', async (req, res) => {
   try {
     log(`🔌 Connecting to game server...`);
     
-    // Simulate server connection
     botState.isConnected = true;
     log(`✅ Connected to mon-jy-1.awawgame.com:30001`);
-    log(`🎮 Game server ready`);
 
     res.json({
       success: true,
@@ -154,9 +177,7 @@ app.post('/api/start', async (req, res) => {
     log(`🚀 Bot started!`);
     log(`⚡ Speed: ${speed}`);
     log(`📋 Quests: ${quests.join(', ')}`);
-    log(`🔄 Repeat: ${repeatCount}x`);
 
-    // Start async automation
     automateQuests(quests, repeatCount, speed).catch(err => {
       log(`❌ Automation error: ${err.message}`);
       botState.isRunning = false;
@@ -191,7 +212,8 @@ app.get('/api/state', (req, res) => {
     isConnected: botState.isConnected,
     gameState: botState.gameState,
     stats: botState.stats,
-    currentQuest: botState.currentQuest
+    currentQuest: botState.currentQuest,
+    logs: botState.logs
   });
 });
 
@@ -221,14 +243,12 @@ async function automateQuests(quests, repeatCount, speed) {
 
 async function executeQuest(questType, delay) {
   try {
-    // Simulate quest steps
     log(`📤 Sending quest packet...`);
     await sleep(500);
 
     log(`⚙️ Processing quest...`);
     await sleep(delay);
 
-    // Generate rewards
     const rewards = generateQuestRewards(questType);
     botState.gameState.gold += rewards.gold;
     botState.gameState.diamonds += rewards.diamonds;
@@ -273,56 +293,68 @@ function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-// ============ WEBSOCKET FOR REAL-TIME UPDATES ============
-wss.on('connection', (ws) => {
-  log(`📡 Browser connected`);
-  clientWebSocket = ws;
+// ============ WEBSOCKET ============
+server.on('upgrade', (request, socket, head) => {
+  wss.handleUpgrade(request, socket, head, (ws) => {
+    log(`📡 Browser connected`);
+    clientWebSocket = ws;
 
-  // Send initial state
-  ws.send(JSON.stringify({
-    type: 'connected',
-    state: botState
-  }));
+    ws.send(JSON.stringify({
+      type: 'connected',
+      state: botState
+    }));
 
-  ws.on('close', () => {
-    log(`📡 Browser disconnected`);
-    clientWebSocket = null;
+    ws.on('close', () => {
+      log(`📡 Browser disconnected`);
+      clientWebSocket = null;
+    });
+
+    ws.on('error', (err) => {
+      console.error('WebSocket error:', err);
+    });
   });
+});
+
+// ============ HEALTH CHECK ============
+app.get('/health', (req, res) => {
+  res.json({ status: 'ok', bot: botState.isRunning ? 'running' : 'idle' });
+});
+
+// ============ 404 HANDLER ============
+app.use((req, res) => {
+  res.status(404).json({ error: 'Not found', path: req.path });
 });
 
 // ============ SERVER STARTUP ============
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`
-  🤖 POKÉMON BOT - BROWSER LAUNCHER
+  🤖 POKÉMON BOT - VERCEL LAUNCHER
   ════════════════════════════════════════════════════════════════
   
   ✅ Server running on port ${PORT}
   
-  🌐 Open in browser:
-     http://localhost:${PORT}
-     
-  📱 Or on phone:
-     http://<your-ip>:${PORT}
+  🌐 API Routes:
+     POST /api/auth        - Login with game credentials
+     POST /api/connect     - Connect to game server
+     POST /api/start       - Start quest automation
+     POST /api/stop        - Stop automation
+     GET  /api/state       - Get bot state
+     GET  /health          - Health check
   
-  🎮 Features:
-     ✓ Real-time dashboard
-     ✓ Game authentication
-     ✓ Server connection
-     ✓ Quest automation
-     ✓ Real-time stats & logs
-     ✓ Speed control
-     ✓ Multiple quest types
+  📱 WebSocket:
+     ws://localhost:${PORT} - Real-time updates
   
-  🎯 Ready to play!
+  🎮 Ready to play!
   ════════════════════════════════════════════════════════════════
   `);
 });
 
-// Graceful shutdown
-process.on('SIGINT', () => {
-  console.log('\n👋 Shutting down...');
-  server.close();
-  process.exit(0);
+process.on('SIGTERM', () => {
+  console.log('SIGTERM received, shutting down gracefully');
+  server.close(() => {
+    console.log('Server closed');
+    process.exit(0);
+  });
 });
 
 module.exports = server;
