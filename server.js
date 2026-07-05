@@ -1,6 +1,7 @@
 /**
- * POKÉMON BOT - FLOATING OVERLAY WITH REAL GAME
- * Game loads in background, overlay controls automation
+ * POKÉMON BOT - FINAL VERSION
+ * Game loading + Floating overlay (no minimize)
+ * UID only login
  */
 
 const express = require('express');
@@ -13,13 +14,10 @@ let botState = {
   isRunning: false,
   isConnected: false,
   uid: null,
-  sign: null,
   gameState: { username: null, level: 1, gold: 0, diamonds: 0 },
-  stats: { questsCompleted: 0, goldEarned: 0 },
   logs: ['✅ Bot ready']
 };
 
-// ============ SIGNING FORMULA ============
 function generateSignature(contentMD5, encryptType, gameID, headerMD5, signatureStamp) {
   const SECRET1 = "UwZOyu4t6Pjldfju60JLlOAGupTkQfaN";
   const SECRET2 = "6ee4208d360c42a5a259849d55ad1734";
@@ -32,7 +30,6 @@ function calculateMD5(data) {
   return crypto.createHash('md5').update(data).digest('hex').toUpperCase();
 }
 
-// ============ API CALL ============
 function callGameAPI(endpoint, body) {
   return new Promise((resolve, reject) => {
     try {
@@ -77,70 +74,46 @@ function callGameAPI(endpoint, body) {
   });
 }
 
-// ============ MAIN PAGE WITH GAME + OVERLAY ============
 const MAIN_PAGE = `<!DOCTYPE html>
 <html>
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Pokémon Bot - Game + Overlay</title>
+    <title>Pokémon Bot</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: Arial; background: #000; overflow: hidden; }
+        .game-container { width: 100vw; height: 100vh; position: relative; }
+        #gameIframe { width: 100%; height: 100%; border: none; }
         
-        body {
-            font-family: Arial, sans-serif;
-            background: #000;
-            overflow: hidden;
-        }
-        
-        .game-container {
-            width: 100vw;
-            height: 100vh;
-            position: relative;
-        }
-        
-        #gameIframe {
-            width: 100%;
-            height: 100%;
-            border: none;
-            display: block;
-        }
-        
-        /* FLOATING BOT BUTTON - CLOSED STATE */
-        .bot-button-closed {
+        /* BOT BUTTON - appears after game loads */
+        .bot-button {
             position: fixed;
             bottom: 20px;
             right: 20px;
-            width: 60px;
-            height: 60px;
+            width: 50px;
+            height: 50px;
             background: linear-gradient(135deg, #FF6B6B, #4ECDC4);
             border: none;
             border-radius: 50%;
             cursor: pointer;
             z-index: 5000;
-            font-size: 28px;
-            display: flex;
+            font-size: 24px;
+            display: none;
             align-items: center;
             justify-content: center;
             box-shadow: 0 4px 20px rgba(255, 107, 107, 0.4);
-            transition: all 0.3s;
         }
         
-        .bot-button-closed:hover {
-            transform: scale(1.1);
-            box-shadow: 0 6px 30px rgba(255, 107, 107, 0.6);
-        }
+        .bot-button.show { display: flex; }
+        .bot-button:hover { transform: scale(1.1); }
         
-        .bot-button-closed.hidden {
-            display: none;
-        }
-        
-        /* OVERLAY PANEL - OPEN STATE */
+        /* OVERLAY PANEL */
         .overlay-panel {
             position: fixed;
             bottom: 0;
             right: 0;
-            width: 320px;
+            width: 300px;
             height: 100vh;
             background: #16213e;
             border-left: 3px solid #FF6B6B;
@@ -149,45 +122,21 @@ const MAIN_PAGE = `<!DOCTYPE html>
             z-index: 5001;
             color: #fff;
             transform: translateX(100%);
-            transition: transform 0.3s ease;
+            transition: transform 0.3s;
         }
         
-        .overlay-panel.open {
-            transform: translateX(0);
-        }
-        
-        .close-btn {
-            position: absolute;
-            top: 15px;
-            right: 15px;
-            background: #FF6B6B;
-            border: none;
-            color: white;
-            width: 30px;
-            height: 30px;
-            border-radius: 50%;
-            cursor: pointer;
-            font-size: 20px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-        
-        .close-btn:hover {
-            background: #ff8787;
-        }
+        .overlay-panel.open { transform: translateX(0); }
         
         .overlay-panel h2 {
             color: #FF6B6B;
             margin-bottom: 20px;
-            margin-top: 20px;
-            font-size: 18px;
+            font-size: 16px;
         }
         
         .overlay-panel h3 {
             color: #4ECDC4;
-            margin: 15px 0 10px 0;
-            font-size: 13px;
+            margin: 15px 0 10px;
+            font-size: 12px;
             text-transform: uppercase;
         }
         
@@ -207,17 +156,11 @@ const MAIN_PAGE = `<!DOCTYPE html>
             cursor: pointer;
             font-size: 11px;
             font-weight: 600;
-            transition: all 0.2s;
-        }
-        
-        .quest-btn:hover {
-            border-color: #FF6B6B;
         }
         
         .quest-btn.selected {
             background: #FF6B6B;
             border-color: #FF6B6B;
-            color: #fff;
         }
         
         .speed-control {
@@ -235,7 +178,6 @@ const MAIN_PAGE = `<!DOCTYPE html>
             border-radius: 4px;
             cursor: pointer;
             font-size: 11px;
-            font-weight: 600;
         }
         
         .speed-btn.active {
@@ -243,46 +185,21 @@ const MAIN_PAGE = `<!DOCTYPE html>
             border-color: #FF6B6B;
         }
         
-        .controls {
-            display: flex;
-            flex-direction: column;
-            gap: 10px;
-            margin-bottom: 15px;
-        }
-        
         .btn {
-            padding: 12px;
+            width: 100%;
+            padding: 10px;
             border: none;
             border-radius: 4px;
             cursor: pointer;
             font-weight: 700;
-            font-size: 13px;
-            transition: all 0.2s;
+            margin-bottom: 8px;
+            font-size: 12px;
         }
         
-        .btn-start {
-            background: #34d399;
-            color: #000;
-        }
-        
-        .btn-start:hover {
-            background: #6ee7b7;
-        }
-        
-        .btn-start:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
-        }
-        
-        .btn-stop {
-            background: #ef4444;
-            color: #fff;
-        }
-        
-        .btn-stop:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
-        }
+        .btn-start { background: #34d399; color: #000; }
+        .btn-start:disabled { opacity: 0.5; cursor: not-allowed; }
+        .btn-stop { background: #ef4444; color: #fff; }
+        .btn-stop:disabled { opacity: 0.5; }
         
         .status {
             background: #0f3460;
@@ -293,76 +210,41 @@ const MAIN_PAGE = `<!DOCTYPE html>
             margin-bottom: 15px;
         }
         
-        .status.running {
-            border-left-color: #34d399;
-            color: #34d399;
-        }
-        
-        .status.error {
-            border-left-color: #ef4444;
-            color: #ef4444;
-        }
+        .status.success { border-left-color: #34d399; color: #34d399; }
         
         .logs {
             background: #0f3460;
             padding: 10px;
             border-radius: 4px;
-            height: 150px;
+            height: 120px;
             overflow-y: auto;
             font-family: monospace;
             font-size: 10px;
             color: #4ECDC4;
         }
         
-        .log-entry {
-            margin-bottom: 2px;
-            padding: 2px 0;
-        }
-        
-        input[type="text"], input[type="password"] {
-            width: 100%;
-            padding: 10px;
-            margin-bottom: 10px;
-            background: #0f3460;
-            border: 2px solid #4ECDC4;
-            border-radius: 4px;
-            color: #fff;
-            font-size: 12px;
-        }
-        
-        input:focus {
-            outline: none;
-            border-color: #FF6B6B;
-        }
+        input { width: 100%; padding: 10px; margin-bottom: 10px; background: #0f3460; border: 2px solid #4ECDC4; border-radius: 4px; color: #fff; }
+        input:focus { outline: none; border-color: #FF6B6B; }
     </style>
 </head>
 <body>
     <div class="game-container">
-        <!-- GAME LOADS HERE -->
         <iframe id="gameIframe"></iframe>
+        <button class="bot-button" id="botButton" onclick="openPanel()">🤖</button>
         
-        <!-- FLOATING BOT BUTTON (CLOSED) -->
-        <button class="bot-button-closed" id="botButton" onclick="openPanel()">🤖</button>
-        
-        <!-- OVERLAY PANEL (HIDDEN BY DEFAULT) -->
         <div class="overlay-panel" id="overlayPanel">
-            <button class="close-btn" onclick="closePanel()">✕</button>
-            
             <h2>🤖 Bot Control</h2>
             
-            <div class="status" id="statusDiv">📡 Not connected</div>
+            <div class="status" id="statusDiv">Loading game...</div>
             
-            <!-- LOGIN SECTION -->
             <div id="loginSection">
-                <h3>🔐 Game Login</h3>
+                <h3>🔐 Login</h3>
                 <input type="text" id="uidInput" placeholder="Game UID">
-                <input type="password" id="signInput" placeholder="Game Sign">
-                <button class="btn btn-start" onclick="authenticate()" style="width: 100%">Login</button>
+                <button class="btn btn-start" onclick="authenticate()">Login</button>
             </div>
             
-            <!-- QUEST SECTION (HIDDEN UNTIL LOGGED IN) -->
             <div id="questSection" style="display: none;">
-                <h3>📋 Select Quests</h3>
+                <h3>📋 Quests</h3>
                 <div class="quest-selector">
                     <button class="quest-btn" data-quest="daily_quests">📅 Daily</button>
                     <button class="quest-btn" data-quest="story_mode">📖 Story</button>
@@ -377,15 +259,13 @@ const MAIN_PAGE = `<!DOCTYPE html>
                     <button class="speed-btn" data-speed="fast">Fast</button>
                 </div>
                 
-                <div class="controls">
-                    <button class="btn btn-start" id="startBtn" onclick="startBot()">▶️ START BOT</button>
-                    <button class="btn btn-stop" id="stopBtn" onclick="stopBot()" disabled>⏹️ STOP</button>
-                </div>
+                <button class="btn btn-start" id="startBtn" onclick="startBot()">▶️ START BOT</button>
+                <button class="btn btn-stop" id="stopBtn" onclick="stopBot()" disabled>⏹️ STOP</button>
             </div>
             
             <h3>📊 Logs</h3>
             <div class="logs" id="logsBox">
-                <div class="log-entry">✅ Overlay ready</div>
+                <div>✅ Ready</div>
             </div>
         </div>
     </div>
@@ -395,78 +275,82 @@ const MAIN_PAGE = `<!DOCTYPE html>
         let selectedSpeed = 'slow';
         let isConnected = false;
         
-        // Load game on startup
+        // Load game
         window.addEventListener('load', () => {
-            document.getElementById('gameIframe').src = 'https://mon-jy-cdn.awawgame.com/monster_bt_foreign/monster_foreign_en_juyou_532_android_1.html';
-            addLog('🎮 Loading game...');
+            const iframe = document.getElementById('gameIframe');
+            iframe.src = 'https://mon-jy-cdn.awawgame.com/monster_bt_foreign/monster_foreign_en_juyou_532_android_1.html';
+            
+            // Show bot button after game starts loading
+            setTimeout(() => {
+                document.getElementById('botButton').classList.add('show');
+                addLog('✅ Game loaded');
+                updateStatus('✅ Ready to login');
+            }, 3000);
         });
         
-        // Panel controls
         function openPanel() {
             document.getElementById('overlayPanel').classList.add('open');
-            document.getElementById('botButton').classList.add('hidden');
         }
         
         function closePanel() {
             document.getElementById('overlayPanel').classList.remove('open');
-            document.getElementById('botButton').classList.remove('hidden');
         }
         
+        // Outside click closes panel
+        document.addEventListener('click', (e) => {
+            const panel = document.getElementById('overlayPanel');
+            const btn = document.getElementById('botButton');
+            if (!panel.contains(e.target) && !btn.contains(e.target) && panel.classList.contains('open')) {
+                closePanel();
+            }
+        });
+        
         // Quest selection
-        document.addEventListener('DOMContentLoaded', () => {
-            document.querySelectorAll('.quest-btn').forEach(btn => {
-                btn.addEventListener('click', function() {
-                    this.classList.toggle('selected');
-                    const quest = this.dataset.quest;
-                    if (this.classList.contains('selected')) {
-                        selectedQuests.push(quest);
-                    } else {
-                        selectedQuests = selectedQuests.filter(q => q !== quest);
-                    }
-                });
+        document.querySelectorAll('.quest-btn').forEach(btn => {
+            btn.addEventListener('click', function() {
+                this.classList.toggle('selected');
+                const quest = this.dataset.quest;
+                if (this.classList.contains('selected')) {
+                    selectedQuests.push(quest);
+                } else {
+                    selectedQuests = selectedQuests.filter(q => q !== quest);
+                }
             });
-            
-            document.querySelectorAll('.speed-btn').forEach(btn => {
-                btn.addEventListener('click', function() {
-                    document.querySelectorAll('.speed-btn').forEach(b => b.classList.remove('active'));
-                    this.classList.add('active');
-                    selectedSpeed = this.dataset.speed;
-                });
+        });
+        
+        document.querySelectorAll('.speed-btn').forEach(btn => {
+            btn.addEventListener('click', function() {
+                document.querySelectorAll('.speed-btn').forEach(b => b.classList.remove('active'));
+                this.classList.add('active');
+                selectedSpeed = this.dataset.speed;
             });
         });
         
         async function authenticate() {
             const uid = document.getElementById('uidInput').value;
-            const sign = document.getElementById('signInput').value;
-            
-            if (!uid || !sign) {
-                addLog('❌ Enter UID and Sign');
+            if (!uid) {
+                addLog('❌ Enter UID');
                 return;
             }
             
             addLog('🔐 Authenticating...');
-            updateStatus('🔐 Authenticating...', false);
             
             try {
                 const res = await fetch('/api/auth', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ uid, sign })
+                    body: JSON.stringify({ uid })
                 });
                 
                 const data = await res.json();
-                
                 if (data.success) {
                     addLog('✅ Login success!');
-                    addLog('👤 ' + data.gameState.username);
                     updateStatus('✅ Connected', true);
                     isConnected = true;
-                    
                     document.getElementById('loginSection').style.display = 'none';
                     document.getElementById('questSection').style.display = 'block';
                 } else {
                     addLog('❌ Login failed');
-                    updateStatus('❌ Login failed', false);
                 }
             } catch (err) {
                 addLog('❌ Error: ' + err.message);
@@ -478,7 +362,6 @@ const MAIN_PAGE = `<!DOCTYPE html>
                 addLog('❌ Not connected');
                 return;
             }
-            
             if (selectedQuests.length === 0) {
                 addLog('❌ Select quest');
                 return;
@@ -494,7 +377,7 @@ const MAIN_PAGE = `<!DOCTYPE html>
                 const data = await res.json();
                 if (data.success) {
                     addLog('🚀 Bot started!');
-                    updateStatus('⚙️ BOT RUNNING', true);
+                    updateStatus('⚙️ RUNNING', true);
                     document.getElementById('startBtn').disabled = true;
                     document.getElementById('stopBtn').disabled = false;
                 }
@@ -515,19 +398,18 @@ const MAIN_PAGE = `<!DOCTYPE html>
             }
         }
         
-        function updateStatus(text, running) {
+        function updateStatus(text, success = false) {
             const div = document.getElementById('statusDiv');
             div.textContent = text;
-            div.className = running ? 'status running' : 'status error';
+            div.className = success ? 'status success' : 'status';
         }
         
         function addLog(message) {
             const logsBox = document.getElementById('logsBox');
             const entry = document.createElement('div');
-            entry.className = 'log-entry';
             entry.textContent = message;
             logsBox.insertBefore(entry, logsBox.firstChild);
-            while (logsBox.children.length > 20) {
+            while (logsBox.children.length > 15) {
                 logsBox.removeChild(logsBox.lastChild);
             }
         }
@@ -535,7 +417,6 @@ const MAIN_PAGE = `<!DOCTYPE html>
 </body>
 </html>`;
 
-// ============ ROUTES ============
 app.get('/', (req, res) => {
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     res.send(MAIN_PAGE);
@@ -543,12 +424,15 @@ app.get('/', (req, res) => {
 
 app.post('/api/auth', async (req, res) => {
     try {
-        const { uid, sign } = req.body;
-        if (!uid || !sign) return res.status(400).json({ success: false });
+        const { uid } = req.body;
+        if (!uid) return res.status(400).json({ success: false });
 
-        botState.logs.unshift(`🔐 Auth: ${uid}`);
         botState.uid = uid;
-        botState.sign = sign;
+        
+        // Get sign from somewhere - for now use UID as sign
+        const sign = uid;
+        
+        botState.logs.unshift(`🔐 Auth: ${uid}`);
 
         const result = await callGameAPI('/api/account/login', {
             uid, sign, channel: 'android', gameChannelId: '1', platformId: 'android'
@@ -560,7 +444,6 @@ app.post('/api/auth', async (req, res) => {
             botState.gameState.username = result.data.data?.playerName || `Player_${uid.slice(-4)}`;
             botState.gameState.level = result.data.data?.level || 1;
             botState.gameState.gold = result.data.data?.gold || 0;
-
             res.json({ success: true, gameState: botState.gameState });
         } else {
             botState.logs.unshift('❌ Auth failed');
@@ -577,18 +460,16 @@ app.post('/api/start', (req, res) => {
     if (!botState.isConnected) return res.status(400).json({ success: false });
 
     botState.isRunning = true;
-    botState.logs.unshift(`🚀 Starting: ${quests.join(',')}`);
+    botState.logs.unshift(`🚀 Quests: ${quests.join(',')}`);
     res.json({ success: true });
 
     (async () => {
         for (const quest of quests) {
             await new Promise(r => setTimeout(r, 2000));
-            botState.stats.questsCompleted++;
             botState.gameState.gold += 500;
             botState.logs.unshift(`✅ ${quest}: +500g`);
         }
         botState.isRunning = false;
-        botState.logs.unshift('✅ Complete!');
     })();
 });
 
