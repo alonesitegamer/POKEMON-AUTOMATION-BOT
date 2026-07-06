@@ -1,13 +1,72 @@
 /**
- * POKÉMON BOT - OVERLAY DIAGNOSTIC
- * Fullscreen game + transparent overlay diagnostic panel
- * Click button to show/hide diagnostics
+ * POKÉMON BOT - SERVICE WORKER PROXY
+ * Uses Service Worker to intercept ALL game network requests
+ * Can see what the game is trying to load and why it fails
  */
 
 const express = require('express');
 const https = require('https');
+const http = require('http');
 const app = express();
 app.use(express.json());
+
+// Service worker code that will intercept all requests
+const SERVICE_WORKER = `
+self.addEventListener('install', () => self.skipWaiting());
+self.addEventListener('activate', (e) => e.waitUntil(clients.claim()));
+
+self.addEventListener('fetch', (event) => {
+    const url = event.request.url;
+    const start = Date.now();
+    
+    fetch(event.request)
+        .then(response => {
+            const time = Date.now() - start;
+            const logMsg = {
+                time: new Date().toISOString(),
+                url: url,
+                status: response.status,
+                duration: time,
+                method: event.request.method
+            };
+            
+            // Send log to client
+            clients.matchAll().then(clients => {
+                clients.forEach(client => {
+                    client.postMessage({
+                        type: 'NETWORK_LOG',
+                        data: logMsg
+                    });
+                });
+            });
+            
+            return response;
+        })
+        .catch(err => {
+            const logMsg = {
+                time: new Date().toISOString(),
+                url: url,
+                error: err.message,
+                method: event.request.method
+            };
+            
+            clients.matchAll().then(clients => {
+                clients.forEach(client => {
+                    client.postMessage({
+                        type: 'NETWORK_ERROR',
+                        data: logMsg
+                    });
+                });
+            });
+            
+            throw err;
+        });
+    
+    event.respondWith(
+        fetch(event.request).catch(err => new Response('Network error: ' + err.message))
+    );
+});
+`;
 
 const OVERLAY_DIAGNOSTIC = `<!DOCTYPE html>
 <html>
@@ -17,7 +76,6 @@ const OVERLAY_DIAGNOSTIC = `<!DOCTYPE html>
     <title>🤖 Pokémon Bot</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        
         body {
             font-family: 'Courier New', monospace;
             background: #000;
@@ -37,7 +95,6 @@ const OVERLAY_DIAGNOSTIC = `<!DOCTYPE html>
             display: block;
         }
         
-        /* FLOATING BUTTON */
         .diagnostic-button {
             position: fixed;
             bottom: 20px;
@@ -54,12 +111,10 @@ const OVERLAY_DIAGNOSTIC = `<!DOCTYPE html>
             align-items: center;
             justify-content: center;
             box-shadow: 0 4px 20px rgba(0, 255, 65, 0.6);
-            transition: all 0.3s;
         }
         
         .diagnostic-button:hover {
             transform: scale(1.1);
-            box-shadow: 0 6px 30px rgba(0, 255, 65, 0.8);
         }
         
         .diagnostic-button.active {
@@ -67,15 +122,14 @@ const OVERLAY_DIAGNOSTIC = `<!DOCTYPE html>
             border-color: #ff4444;
         }
         
-        /* OVERLAY PANEL - Semi-transparent */
         .overlay-diagnostic {
             position: fixed;
             top: 50%;
             left: 50%;
             transform: translate(-50%, -50%);
-            width: 80%;
-            max-width: 600px;
-            height: 70%;
+            width: 85%;
+            max-width: 700px;
+            height: 75%;
             background: rgba(10, 14, 39, 0.95);
             border: 2px solid #00ff41;
             border-radius: 8px;
@@ -90,7 +144,6 @@ const OVERLAY_DIAGNOSTIC = `<!DOCTYPE html>
             display: flex;
         }
         
-        /* HEADER */
         .diagnostic-header {
             background: linear-gradient(135deg, #00ff41, #00ffff);
             color: #0a0e27;
@@ -123,7 +176,6 @@ const OVERLAY_DIAGNOSTIC = `<!DOCTYPE html>
             background: #ff4444;
         }
         
-        /* TABS */
         .diagnostic-tabs {
             display: flex;
             background: rgba(26, 31, 58, 0.8);
@@ -140,29 +192,18 @@ const OVERLAY_DIAGNOSTIC = `<!DOCTYPE html>
             border: none;
             font-size: 11px;
             font-weight: 600;
-            transition: all 0.2s;
-        }
-        
-        .diagnostic-tab:hover {
-            background: rgba(0, 255, 65, 0.1);
         }
         
         .diagnostic-tab.active {
             background: rgba(0, 255, 65, 0.2);
             color: #00ff41;
-            border-bottom: 2px solid #00ff41;
         }
         
-        .diagnostic-tab:last-child {
-            border-right: none;
-        }
-        
-        /* CONTENT */
         .diagnostic-content {
             flex: 1;
             overflow-y: auto;
             padding: 10px;
-            font-size: 10px;
+            font-size: 9px;
             line-height: 1.4;
             display: none;
         }
@@ -172,104 +213,71 @@ const OVERLAY_DIAGNOSTIC = `<!DOCTYPE html>
         }
         
         .log-entry {
-            margin-bottom: 4px;
-            padding: 4px;
+            margin-bottom: 3px;
+            padding: 3px;
             border-left: 2px solid #00ff41;
-            padding-left: 8px;
+            padding-left: 6px;
             font-family: monospace;
         }
         
-        .log-error {
-            color: #ff4444;
-            border-left-color: #ff4444;
-        }
+        .log-error { color: #ff4444; border-left-color: #ff4444; }
+        .log-warn { color: #ffaa00; border-left-color: #ffaa00; }
+        .log-success { color: #44ff44; border-left-color: #44ff44; }
+        .log-info { color: #00ffff; border-left-color: #00ffff; }
         
-        .log-warn {
-            color: #ffaa00;
-            border-left-color: #ffaa00;
-        }
-        
-        .log-success {
-            color: #44ff44;
-            border-left-color: #44ff44;
-        }
-        
-        .log-info {
-            color: #00ffff;
-            border-left-color: #00ffff;
-        }
-        
-        /* CONTROLS */
         .diagnostic-controls {
-            padding: 10px;
+            padding: 8px;
             background: rgba(26, 31, 58, 0.8);
             border-top: 1px solid #00ff41;
             display: flex;
-            gap: 8px;
+            gap: 6px;
         }
         
         .btn-diag {
             flex: 1;
-            padding: 8px;
+            padding: 6px;
             background: #00ff41;
             color: #0a0e27;
             border: none;
-            border-radius: 4px;
+            border-radius: 3px;
             cursor: pointer;
-            font-size: 10px;
+            font-size: 9px;
             font-weight: bold;
-            transition: all 0.2s;
         }
         
         .btn-diag:hover {
             opacity: 0.8;
-            transform: translateY(-2px);
-        }
-        
-        ::-webkit-scrollbar {
-            width: 6px;
-        }
-        
-        ::-webkit-scrollbar-track {
-            background: rgba(26, 31, 58, 0.5);
-        }
-        
-        ::-webkit-scrollbar-thumb {
-            background: #00ff41;
-            border-radius: 3px;
         }
     </style>
 </head>
 <body>
     <div class="game-container">
-        <iframe id="gameIframe"></iframe>
-        
-        <!-- FLOATING BUTTON -->
+        <iframe id="gameIframe" sandbox="allow-same-origin allow-scripts allow-forms allow-popups"></iframe>
         <button class="diagnostic-button" id="diagButton" onclick="toggleDiagnostic()">🔍</button>
         
-        <!-- OVERLAY DIAGNOSTIC PANEL -->
         <div class="overlay-diagnostic" id="diagPanel">
             <div class="diagnostic-header">
-                🔍 DIAGNOSTIC OVERLAY
+                🔍 NETWORK DIAGNOSTICS
                 <button class="close-button" onclick="closeDiagnostic()">✕</button>
             </div>
             
             <div class="diagnostic-tabs">
-                <button class="diagnostic-tab active" onclick="switchDiagTab('console')">Console</button>
-                <button class="diagnostic-tab" onclick="switchDiagTab('network')">Network</button>
+                <button class="diagnostic-tab active" onclick="switchDiagTab('network')">Network Requests</button>
                 <button class="diagnostic-tab" onclick="switchDiagTab('errors')">Errors</button>
+                <button class="diagnostic-tab" onclick="switchDiagTab('status')">Status</button>
             </div>
             
-            <div class="diagnostic-content show" id="console">
-                <div class="log-entry log-info">📡 Initializing diagnostics...</div>
-            </div>
-            
-            <div class="diagnostic-content" id="network">
-                <div class="log-entry log-info">🔌 Monitoring network...</div>
+            <div class="diagnostic-content show" id="network">
+                <div class="log-entry log-info">🔌 Waiting for network activity...</div>
             </div>
             
             <div class="diagnostic-content" id="errors">
-                <div class="log-entry log-info">🛡️ Error tracking active</div>
+                <div class="log-entry log-info">✅ No errors yet</div>
+            </div>
+            
+            <div class="diagnostic-content" id="status">
+                <div class="log-entry log-info">📊 Game Status</div>
+                <div class="log-entry log-info" id="statusText">Loading...</div>
             </div>
             
             <div class="diagnostic-controls">
@@ -282,85 +290,69 @@ const OVERLAY_DIAGNOSTIC = `<!DOCTYPE html>
 
     <script>
         const diagLogs = {
-            console: [],
             network: [],
-            errors: []
+            errors: [],
+            status: []
         };
         
         let diagOpen = false;
+        let requestCount = 0;
+        let errorCount = 0;
         
-        // ============ CONSOLE CAPTURE ============
-        const origLog = console.log;
-        const origError = console.error;
-        const origWarn = console.warn;
+        // Register service worker
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('/sw.js').then(() => {
+                addDiagLog('network', '✅ Service Worker registered', 'success');
+            }).catch(err => {
+                addDiagLog('errors', '❌ SW registration failed: ' + err.message, 'error');
+            });
+            
+            // Listen for messages from service worker
+            navigator.serviceWorker.addEventListener('message', (event) => {
+                if (event.data.type === 'NETWORK_LOG') {
+                    const log = event.data.data;
+                    const url = log.url.substring(log.url.lastIndexOf('/'));
+                    addDiagLog('network', '✅ [' + log.status + '] ' + log.duration + 'ms ' + url, 'success');
+                    requestCount++;
+                    updateStatus();
+                } else if (event.data.type === 'NETWORK_ERROR') {
+                    const log = event.data.data;
+                    const url = log.url.substring(log.url.lastIndexOf('/'));
+                    addDiagLog('errors', '❌ ' + log.error + ' ' + url, 'error');
+                    addDiagLog('network', '❌ FAILED: ' + url, 'error');
+                    errorCount++;
+                    updateStatus();
+                }
+            });
+        }
         
-        console.log = function(...args) {
-            origLog(...args);
-            addDiagLog('console', '📝 ' + args.join(' '), 'info');
-        };
-        
-        console.error = function(...args) {
-            origError(...args);
-            addDiagLog('console', '❌ ' + args.join(' '), 'error');
-            addDiagLog('errors', '❌ ' + args.join(' '), 'error');
-        };
-        
-        console.warn = function(...args) {
-            origWarn(...args);
-            addDiagLog('console', '⚠️ ' + args.join(' '), 'warn');
-        };
-        
-        // ============ GLOBAL ERROR HANDLER ============
+        // Global error handler
         window.addEventListener('error', (e) => {
-            addDiagLog('console', '💥 Runtime Error: ' + e.message, 'error');
             addDiagLog('errors', '💥 ' + e.message, 'error');
+            errorCount++;
+            updateStatus();
         });
         
         window.addEventListener('unhandledrejection', (e) => {
-            addDiagLog('console', '🔴 Promise Rejection: ' + e.reason, 'error');
-            addDiagLog('errors', '🔴 ' + e.reason, 'error');
+            addDiagLog('errors', '🔴 Promise: ' + e.reason, 'error');
+            errorCount++;
+            updateStatus();
         });
         
-        // ============ FETCH INTERCEPTION ============
-        const origFetch = window.fetch;
-        window.fetch = function(...args) {
-            const urlStr = args[0];
-            const start = Date.now();
-            
-            addDiagLog('network', '📤 → ' + urlStr.substring(0, 70), 'info');
-            
-            return origFetch.apply(this, args)
-                .then(res => {
-                    const time = Date.now() - start;
-                    const status = res.status;
-                    const className = status === 200 ? 'success' : 'error';
-                    addDiagLog('network', '📥 ← [' + status + '] ' + time + 'ms', className);
-                    return res;
-                })
-                .catch(err => {
-                    addDiagLog('network', '🔴 ' + err.message, 'error');
-                    addDiagLog('errors', '🔴 ' + err.message, 'error');
-                    throw err;
-                });
-        };
-        
-        // ============ GAME LOADING ============
+        // Load game
         window.addEventListener('load', () => {
-            addDiagLog('console', '🎮 Loading game via proxy...', 'info');
-            document.getElementById('gameIframe').src = '/game-proxy';
-            
-            setTimeout(() => {
-                addDiagLog('console', '✅ Game iframe loaded', 'success');
-            }, 2000);
+            addDiagLog('network', '🎮 Loading game...', 'info');
+            document.getElementById('gameIframe').src = 'https://mon-jy-cdn.awawgame.com/monster_bt_foreign/monster_foreign_en_juyou_532_android_1.html';
+            updateStatus();
         });
         
-        // ============ DIAGNOSTIC FUNCTIONS ============
+        function updateStatus() {
+            const statusText = document.getElementById('statusText');
+            statusText.textContent = '📊 Requests: ' + requestCount + ' | Errors: ' + errorCount;
+        }
+        
         function toggleDiagnostic() {
-            if (diagOpen) {
-                closeDiagnostic();
-            } else {
-                openDiagnostic();
-            }
+            diagOpen ? closeDiagnostic() : openDiagnostic();
         }
         
         function openDiagnostic() {
@@ -392,23 +384,32 @@ const OVERLAY_DIAGNOSTIC = `<!DOCTYPE html>
             entry.textContent = '[' + new Date().toLocaleTimeString() + '] ' + message;
             elem.insertBefore(entry, elem.firstChild);
             
-            while (elem.children.length > 150) {
+            while (elem.children.length > 200) {
                 elem.removeChild(elem.lastChild);
             }
-            
-            diagLogs[section] = diagLogs[section] || [];
-            diagLogs[section].push(message);
         }
         
         function clearDiagLogs() {
             document.querySelectorAll('.diagnostic-content').forEach(el => {
-                el.innerHTML = '<div class="log-entry log-info">Cleared</div>';
+                const firstChild = el.firstChild;
+                el.innerHTML = '';
+                if (el.id === 'status') {
+                    el.innerHTML = '<div class="log-entry log-info">📊 Game Status</div><div class="log-entry log-info" id="statusText">Cleared</div>';
+                } else {
+                    el.appendChild(document.createElement('div')).className = 'log-entry log-info';
+                }
             });
+            requestCount = 0;
+            errorCount = 0;
         }
         
         function downloadDiagLogs() {
             const data = {
                 diagnostics: diagLogs,
+                summary: {
+                    totalRequests: requestCount,
+                    totalErrors: errorCount
+                },
                 timestamp: new Date().toISOString()
             };
             
@@ -421,38 +422,27 @@ const OVERLAY_DIAGNOSTIC = `<!DOCTYPE html>
         
         function reloadDiagGame() {
             document.getElementById('gameIframe').src = '';
+            clearDiagLogs();
             setTimeout(() => {
-                document.getElementById('gameIframe').src = '/game-proxy';
-                addDiagLog('console', '🔄 Game reloaded', 'success');
+                document.getElementById('gameIframe').src = 'https://mon-jy-cdn.awawgame.com/monster_bt_foreign/monster_foreign_en_juyou_532_android_1.html';
+                addDiagLog('network', '🔄 Game reloaded', 'success');
             }, 500);
         }
     </script>
 </body>
 </html>`;
 
-// ============ ROUTES ============
+// ============ MAIN PAGE ============
 app.get('/', (req, res) => {
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     res.send(OVERLAY_DIAGNOSTIC);
 });
 
-// ============ GAME PROXY ============
-app.get('/game-proxy', (req, res) => {
-    const gameUrl = 'https://mon-jy-cdn.awawgame.com/monster_bt_foreign/monster_foreign_en_juyou_532_android_1.html';
-    
-    https.get(gameUrl, (proxyRes) => {
-        const headers = {
-            'Content-Type': proxyRes.headers['content-type'],
-            'Access-Control-Allow-Origin': '*',
-            'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE',
-            'Access-Control-Allow-Headers': '*'
-        };
-        
-        res.writeHead(proxyRes.statusCode, headers);
-        proxyRes.pipe(res);
-    }).on('error', (err) => {
-        res.status(500).send('Proxy error: ' + err.message);
-    });
+// ============ SERVICE WORKER ============
+app.get('/sw.js', (req, res) => {
+    res.setHeader('Content-Type', 'application/javascript');
+    res.setHeader('Service-Worker-Allowed', '/');
+    res.send(SERVICE_WORKER);
 });
 
 app.get('/health', (req, res) => res.json({ status: 'ok' }));
