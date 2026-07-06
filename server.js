@@ -1,290 +1,120 @@
 /**
- * POKÉMON BOT - DIRECT LOADER
- * Loads game directly (no iframe)
- * Shows real console logs from game
+ * POKÉMON BOT - CONFIG INTERCEPTOR
+ * Intercepts config.json and injects runtime secret
+ * Allows game to load in browser via Vercel proxy
  */
 
 const express = require('express');
 const https = require('https');
+const crypto = require('crypto');
 const app = express();
 app.use(express.json());
 
-const DIRECT_LOADER = `<!DOCTYPE html>
+// ============ RUNTIME SECRETS ============
+const RUNTIME_SECRETS = {
+  appId: '87',
+  appKey: '6ee4208d360c42a5a259849d55ad1734',
+  secret1: 'UwZOyu4t6Pjldfju60JLlOAGupTkQfaN',
+  secret2: '6ee4208d360c42a5a259849d55ad1734',
+  deviceId: 'vercel-bot-device-001',
+  timestamp: Date.now()
+};
+
+const GAME_PAGE = `<!DOCTYPE html>
 <html>
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>🎮 Pokémon Bot - Direct Loader</title>
+    <title>🎮 Pokémon Game Loader</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        
-        body {
-            font-family: 'Courier New', monospace;
-            background: #000;
-            overflow: hidden;
-            display: flex;
-            height: 100vh;
-        }
-        
-        .game-wrapper {
-            flex: 1;
-            background: #000;
-            position: relative;
-            display: flex;
-            flex-direction: column;
-        }
-        
-        .game-content {
-            flex: 1;
-            position: relative;
-            background: #000;
-        }
-        
-        .console-panel {
-            width: 100%;
-            height: 200px;
-            background: #0a0e27;
-            border-top: 2px solid #00ff41;
-            color: #00ff41;
-            padding: 10px;
-            overflow-y: auto;
-            font-size: 11px;
-            font-family: monospace;
-        }
-        
-        .console-entry {
-            margin-bottom: 4px;
-            padding: 3px;
-            border-left: 2px solid #00ff41;
-            padding-left: 6px;
-        }
-        
-        .console-log { color: #00ffff; border-left-color: #00ffff; }
-        .console-error { color: #ff4444; border-left-color: #ff4444; }
-        .console-warn { color: #ffaa00; border-left-color: #ffaa00; }
-        .console-info { color: #44ff44; border-left-color: #44ff44; }
-        
-        .console-controls {
-            padding: 8px;
-            background: #1a1f3a;
-            display: flex;
-            gap: 8px;
-            border-top: 1px solid #00ff41;
-        }
-        
-        .btn {
-            padding: 6px 12px;
-            background: #00ff41;
-            color: #0a0e27;
-            border: none;
-            border-radius: 3px;
-            cursor: pointer;
-            font-size: 10px;
+        body { background: #000; font-family: Arial; }
+        .status { 
+            position: fixed;
+            top: 10px;
+            left: 10px;
+            background: rgba(0,255,65,0.9);
+            color: #000;
+            padding: 10px 15px;
+            border-radius: 4px;
             font-weight: bold;
+            z-index: 10000;
+            font-size: 12px;
         }
-        
-        .btn:hover {
-            opacity: 0.8;
-        }
-        
-        .status-bar {
-            padding: 8px;
-            background: #1a1f3a;
-            border-bottom: 1px solid #00ff41;
-            font-size: 11px;
-            color: #00ff41;
-        }
-        
-        .status-indicator {
-            display: inline-block;
-            width: 10px;
-            height: 10px;
-            border-radius: 50%;
-            margin-right: 5px;
-        }
-        
-        .status-loading { background: #ffaa00; animation: pulse 1s infinite; }
-        .status-error { background: #ff4444; }
-        .status-success { background: #44ff44; }
-        
-        @keyframes pulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.5; }
-        }
-        
-        ::-webkit-scrollbar {
-            width: 6px;
-        }
-        
-        ::-webkit-scrollbar-track {
-            background: #1a1f3a;
-        }
-        
-        ::-webkit-scrollbar-thumb {
-            background: #00ff41;
-        }
+        #gameFrame { width: 100vw; height: 100vh; border: none; }
     </style>
 </head>
 <body>
-    <div class="game-wrapper">
-        <div class="status-bar">
-            <span class="status-indicator status-loading" id="statusInd"></span>
-            <span id="statusText">🎮 Loading game directly...</span>
-        </div>
-        
-        <div class="game-content" id="gameContent">
-            <!-- Game will load here -->
-        </div>
-        
-        <div class="console-panel">
-            <div class="console-entry console-info">📡 Console Output:</div>
-            <div id="consoleOutput"></div>
-        </div>
-        
-        <div class="console-controls">
-            <button class="btn" onclick="clearConsole()">Clear</button>
-            <button class="btn" onclick="downloadLogs()">Download</button>
-            <button class="btn" onclick="reloadGame()">Reload</button>
-        </div>
+    <div class="status">
+        ✅ Game loading with config interceptor...
     </div>
+    <iframe id="gameFrame"></iframe>
 
     <script>
-        const consoleLogs = [];
-        
-        // Capture console.log
-        const origLog = console.log;
-        console.log = function(...args) {
-            origLog(...args);
-            addConsoleEntry('[LOG] ' + args.join(' '), 'log');
-        };
-        
-        // Capture console.error
-        const origError = console.error;
-        console.error = function(...args) {
-            origError(...args);
-            addConsoleEntry('[ERROR] ' + args.join(' '), 'error');
-        };
-        
-        // Capture console.warn
-        const origWarn = console.warn;
-        console.warn = function(...args) {
-            origWarn(...args);
-            addConsoleEntry('[WARN] ' + args.join(' '), 'warn');
-        };
-        
-        // Global error handler
-        window.addEventListener('error', (e) => {
-            addConsoleEntry('💥 RUNTIME ERROR: ' + e.message, 'error');
-            updateStatus('❌ Runtime Error', 'error');
-        });
-        
-        window.addEventListener('unhandledrejection', (e) => {
-            addConsoleEntry('🔴 UNHANDLED PROMISE: ' + e.reason, 'error');
-            updateStatus('❌ Promise Rejection', 'error');
-        });
-        
-        // Network logging
+        // Intercept all fetch requests
         const origFetch = window.fetch;
         window.fetch = function(...args) {
             const url = args[0];
-            const start = Date.now();
             
-            addConsoleEntry('📤 [FETCH] → ' + url.substring(0, 80), 'info');
+            // Intercept config.json
+            if (url.includes('config.json') || url.includes('config')) {
+                console.log('🔍 Intercepted config request:', url);
+                
+                // Return modified config
+                return Promise.resolve({
+                    ok: true,
+                    status: 200,
+                    headers: new Headers({ 'content-type': 'application/json' }),
+                    json: async () => ({
+                        appId: '87',
+                        appKey: '6ee4208d360c42a5a259849d55ad1734',
+                        runtimeSecret: 'UwZOyu4t6Pjldfju60JLlOAGupTkQfaN',
+                        deviceId: 'browser-device-' + Math.random().toString(36).substr(2, 9),
+                        timestamp: Date.now(),
+                        apiServer: 'apisdk.awawgame.com',
+                        gameServer: 'mon-jy-1.awawgame.com',
+                        cdnServer: 'mon-jy-cdn.awawgame.com',
+                        version: '1.0.3',
+                        authenticated: true
+                    }),
+                    text: async () => JSON.stringify({
+                        appId: '87',
+                        appKey: '6ee4208d360c42a5a259849d55ad1734',
+                        runtimeSecret: 'UwZOyu4t6Pjldfju60JLlOAGupTkQfaN'
+                    })
+                });
+            }
+            
+            // Log other requests
+            console.log('📤 [FETCH]', url.substring(0, 80));
             
             return origFetch.apply(this, args)
                 .then(res => {
-                    const time = Date.now() - start;
-                    addConsoleEntry('📥 [' + res.status + '] ' + time + 'ms', 'info');
+                    console.log('📥 [' + res.status + ']', url.substring(0, 60));
                     return res;
                 })
                 .catch(err => {
-                    addConsoleEntry('❌ [FETCH ERROR] ' + err.message, 'error');
+                    console.error('❌ FETCH ERROR:', err.message);
                     throw err;
                 });
         };
         
         // Load game
-        window.addEventListener('load', () => {
-            addConsoleEntry('🎮 Page loaded, fetching game HTML...', 'info');
-            updateStatus('🎮 Loading game...', 'loading');
-            
-            fetch('/game-html')
-                .then(res => res.text())
-                .then(html => {
-                    addConsoleEntry('✅ Game HTML received (' + html.length + ' bytes)', 'log');
-                    document.getElementById('gameContent').innerHTML = html;
-                    updateStatus('✅ Game loaded', 'success');
-                    
-                    // Give game time to initialize
-                    setTimeout(() => {
-                        addConsoleEntry('⏳ Waiting for game initialization...', 'info');
-                    }, 1000);
-                })
-                .catch(err => {
-                    addConsoleEntry('❌ Failed to load game: ' + err.message, 'error');
-                    updateStatus('❌ Load failed', 'error');
-                });
-        });
-        
-        function addConsoleEntry(message, type = 'log') {
-            const output = document.getElementById('consoleOutput');
-            const entry = document.createElement('div');
-            entry.className = 'console-entry console-' + type;
-            entry.textContent = '[' + new Date().toLocaleTimeString() + '] ' + message;
-            output.insertBefore(entry, output.firstChild);
-            
-            consoleLogs.push({
-                time: new Date().toISOString(),
-                type: type,
-                message: message
-            });
-            
-            while (output.children.length > 200) {
-                output.removeChild(output.lastChild);
-            }
-        }
-        
-        function updateStatus(text, status) {
-            document.getElementById('statusText').textContent = text;
-            const ind = document.getElementById('statusInd');
-            ind.className = 'status-indicator status-' + status;
-        }
-        
-        function clearConsole() {
-            document.getElementById('consoleOutput').innerHTML = '';
-            consoleLogs.length = 0;
-        }
-        
-        function downloadLogs() {
-            const data = {
-                consoleLogs,
-                timestamp: new Date().toISOString()
-            };
-            
-            const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-            const a = document.createElement('a');
-            a.href = URL.createObjectURL(blob);
-            a.download = 'pokemon-bot-logs.json';
-            a.click();
-        }
-        
-        function reloadGame() {
-            document.getElementById('gameContent').innerHTML = '';
-            clearConsole();
-            location.reload();
-        }
+        document.getElementById('gameFrame').src = 'https://mon-jy-cdn.awawgame.com/monster_bt_foreign/monster_foreign_en_juyou_532_android_1.html';
     </script>
 </body>
 </html>`;
 
-// ============ MAIN PAGE ============
+// ============ ROUTES ============
+
+// Main game loader with config interceptor
 app.get('/', (req, res) => {
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
-    res.send(DIRECT_LOADER);
+    res.send(GAME_PAGE);
 });
 
-// ============ FETCH GAME HTML ============
-app.get('/game-html', (req, res) => {
+// Alternative: Serve modified game HTML with injected config
+app.get('/game-with-config', (req, res) => {
     const gameUrl = 'https://mon-jy-cdn.awawgame.com/monster_bt_foreign/monster_foreign_en_juyou_532_android_1.html';
     
     https.get(gameUrl, (proxyRes) => {
@@ -295,28 +125,43 @@ app.get('/game-html', (req, res) => {
         });
         
         proxyRes.on('end', () => {
-            // Inject console logging into game
-            const inject = `
+            // Inject config interceptor into game HTML
+            const injectedCode = `
             <script>
-            window.originalLog = console.log;
-            console.log = function(...args) {
-                window.originalLog(...args);
-                window.parent.console.log('[GAME] ' + args.join(' '));
+            window.CONFIG_INJECTED = true;
+            window.RUNTIME_CONFIG = {
+                appId: '87',
+                appKey: '6ee4208d360c42a5a259849d55ad1734',
+                runtimeSecret: 'UwZOyu4t6Pjldfju60JLlOAGupTkQfaN',
+                deviceId: 'browser-' + Math.random().toString(36).substr(2, 9),
+                timestamp: ${Date.now()},
+                apiServer: 'apisdk.awawgame.com',
+                gameServer: 'mon-jy-1.awawgame.com'
             };
             
-            window.onerror = function(msg, url, line) {
-                window.parent.console.error('[GAME ERROR] ' + msg + ' at ' + line);
-                return false;
+            // Intercept fetch before game loads
+            const origFetch = window.fetch;
+            window.fetch = function(...args) {
+                const url = args[0];
+                
+                if (typeof url === 'string' && url.includes('config')) {
+                    console.log('[INTERCEPTOR] Config request intercepted');
+                    return Promise.resolve({
+                        ok: true,
+                        status: 200,
+                        headers: new Headers({'content-type': 'application/json'}),
+                        json: async () => window.RUNTIME_CONFIG,
+                        text: async () => JSON.stringify(window.RUNTIME_CONFIG)
+                    });
+                }
+                
+                return origFetch.apply(this, args);
             };
-            
-            window.addEventListener('unhandledrejection', (e) => {
-                window.parent.console.error('[GAME PROMISE] ' + e.reason);
-            });
             </script>
             `;
             
-            // Insert before closing body
-            html = html.replace('</body>', inject + '</body>');
+            // Insert before closing head or body
+            html = html.replace('</head>', injectedCode + '</head>');
             
             res.setHeader('Content-Type', 'text/html; charset=utf-8');
             res.setHeader('Access-Control-Allow-Origin', '*');
@@ -327,6 +172,18 @@ app.get('/game-html', (req, res) => {
     });
 });
 
-app.get('/health', (req, res) => res.json({ status: 'ok' }));
+// API: Get runtime config
+app.get('/api/config', (req, res) => {
+    res.json(RUNTIME_SECRETS);
+});
+
+// Health check
+app.get('/health', (req, res) => {
+    res.json({ 
+        status: 'ok',
+        runtimeSecrets: !!RUNTIME_SECRETS,
+        configInjectorActive: true
+    });
+});
 
 module.exports = app;
