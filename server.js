@@ -1,6 +1,6 @@
 /**
- * POKÉMON BOT - SIMPLE DEBUG
- * Game fullscreen + click button to see errors/status
+ * POKÉMON BOT - SHOW CONSOLE ERRORS
+ * Captures what game is actually doing/erroring
  */
 
 const express = require('express');
@@ -8,7 +8,7 @@ const https = require('https');
 const app = express();
 app.use(express.json());
 
-const SIMPLE_PAGE = `<!DOCTYPE html>
+const CONSOLE_PAGE = `<!DOCTYPE html>
 <html>
 <head>
     <meta charset="UTF-8">
@@ -22,10 +22,9 @@ const SIMPLE_PAGE = `<!DOCTYPE html>
             width: 100vw;
             height: 100vh;
             border: none;
-            display: block;
         }
         
-        .debug-btn {
+        .console-btn {
             position: fixed;
             bottom: 20px;
             right: 20px;
@@ -40,246 +39,186 @@ const SIMPLE_PAGE = `<!DOCTYPE html>
             box-shadow: 0 4px 15px rgba(0,255,65,0.6);
         }
         
-        .debug-btn:active {
-            transform: scale(0.95);
-        }
-        
-        .debug-overlay {
+        .console-overlay {
             position: fixed;
             top: 0;
             left: 0;
             width: 100vw;
             height: 100vh;
-            background: rgba(0,0,0,0.8);
+            background: rgba(0,0,0,0.9);
             z-index: 5001;
             display: none;
-            justify-content: center;
-            align-items: center;
         }
         
-        .debug-overlay.show {
+        .console-overlay.show {
             display: flex;
+            flex-direction: column;
         }
         
-        .debug-box {
+        .console-header {
             background: #1a1a2e;
             color: #00ff41;
-            padding: 20px;
-            border-radius: 8px;
-            border: 2px solid #00ff41;
-            max-width: 85%;
-            max-height: 80%;
-            overflow-y: auto;
-            font-family: monospace;
-            font-size: 13px;
-            line-height: 1.6;
+            padding: 15px;
+            border-bottom: 2px solid #00ff41;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-weight: bold;
         }
         
-        .close-btn {
-            position: absolute;
-            top: 15px;
-            right: 15px;
+        .console-content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 15px;
+            font-family: monospace;
+            font-size: 12px;
+            color: #00ff41;
+            line-height: 1.5;
+        }
+        
+        .console-log { color: #00ffff; }
+        .console-error { color: #ff4444; font-weight: bold; }
+        .console-warn { color: #ffaa00; font-weight: bold; }
+        .console-info { color: #44ff44; }
+        
+        .log-line {
+            margin-bottom: 8px;
+            padding: 8px;
+            background: rgba(255,255,255,0.05);
+            border-left: 3px solid #00ff41;
+            border-radius: 2px;
+        }
+        
+        .log-line.error {
+            border-left-color: #ff4444;
+            background: rgba(255,68,68,0.1);
+        }
+        
+        .log-line.warn {
+            border-left-color: #ffaa00;
+            background: rgba(255,170,0,0.1);
+        }
+        
+        .log-time {
+            color: #999;
+            font-size: 10px;
+        }
+        
+        .close-x {
             background: #ff4444;
             color: white;
             border: none;
-            width: 40px;
-            height: 40px;
+            width: 35px;
+            height: 35px;
             border-radius: 50%;
             cursor: pointer;
-            font-size: 24px;
-            font-weight: bold;
-        }
-        
-        .debug-title {
-            font-size: 16px;
-            font-weight: bold;
-            color: #00ff41;
-            margin-bottom: 15px;
-            border-bottom: 2px solid #00ff41;
-            padding-bottom: 10px;
-        }
-        
-        .debug-section {
-            margin-bottom: 15px;
-        }
-        
-        .debug-section-title {
-            color: #ffaa00;
-            font-weight: bold;
-            margin-bottom: 8px;
-        }
-        
-        .debug-item {
-            color: #00ffff;
-            margin-bottom: 6px;
-            padding-left: 10px;
-            border-left: 2px solid #00ff41;
-        }
-        
-        .debug-error {
-            color: #ff4444;
-            border-left-color: #ff4444;
-        }
-        
-        .debug-success {
-            color: #44ff44;
-            border-left-color: #44ff44;
+            font-size: 20px;
         }
     </style>
 </head>
 <body>
     <iframe id="gameFrame"></iframe>
-    <button class="debug-btn" onclick="showDebug()">🐛</button>
+    <button class="console-btn" onclick="showConsole()">🖥️</button>
     
-    <div class="debug-overlay" id="debugOverlay" onclick="closeDebug(event)">
-        <button class="close-btn" onclick="closeDebug()">✕</button>
-        <div class="debug-box" onclick="event.stopPropagation()">
-            <div class="debug-title">🔍 GAME DEBUG STATUS</div>
-            
-            <div class="debug-section">
-                <div class="debug-section-title">📊 REQUESTS MADE:</div>
-                <div id="requestCount" class="debug-item">Loading...</div>
-                <div id="errorCount" class="debug-item">No errors yet</div>
-            </div>
-            
-            <div class="debug-section">
-                <div class="debug-section-title">✅ SUCCESS REQUESTS:</div>
-                <div id="successList"></div>
-            </div>
-            
-            <div class="debug-section">
-                <div class="debug-section-title">❌ FAILED REQUESTS:</div>
-                <div id="errorList"></div>
-            </div>
-            
-            <div class="debug-section">
-                <div class="debug-section-title">🎯 LAST STATUS:</div>
-                <div id="lastStatus" class="debug-item">Initializing game...</div>
-            </div>
+    <div class="console-overlay" id="consoleOverlay">
+        <div class="console-header">
+            📺 GAME CONSOLE OUTPUT
+            <button class="close-x" onclick="closeConsole()">✕</button>
         </div>
+        <div class="console-content" id="consoleContent"></div>
     </div>
 
     <script>
-        let stats = {
-            total: 0,
-            success: 0,
-            errors: 0,
-            requests: [],
-            lastStatus: '🎮 Game initializing...'
+        const consoleLogs = [];
+        
+        // Capture console methods
+        const methods = {
+            log: console.log,
+            error: console.error,
+            warn: console.warn,
+            info: console.info
         };
         
-        // Intercept fetch
-        const origFetch = window.fetch;
-        window.fetch = function(...args) {
-            const url = args[0];
-            stats.total++;
-            
-            const shortUrl = url.substring(url.lastIndexOf('/'));
-            stats.lastStatus = '📤 Requesting: ' + shortUrl;
-            
-            return origFetch.apply(this, args)
-                .then(res => {
-                    const status = res.status;
-                    if (status >= 200 && status < 300) {
-                        stats.success++;
-                        stats.requests.push({
-                            type: 'success',
-                            url: shortUrl,
-                            status: status
-                        });
-                        stats.lastStatus = '✅ Got: ' + status + ' ' + shortUrl;
-                    } else {
-                        stats.errors++;
-                        stats.requests.push({
-                            type: 'error',
-                            url: shortUrl,
-                            status: status
-                        });
-                        stats.lastStatus = '❌ Error ' + status + ': ' + shortUrl;
-                    }
-                    updateDebugUI();
-                    return res;
-                })
-                .catch(err => {
-                    stats.errors++;
-                    stats.requests.push({
-                        type: 'error',
-                        url: shortUrl,
-                        status: 'FAILED',
-                        error: err.message
-                    });
-                    stats.lastStatus = '🔴 Failed: ' + err.message;
-                    updateDebugUI();
-                    throw err;
-                });
+        console.log = function(...args) {
+            methods.log(...args);
+            addLog('log', args.join(' '));
         };
         
-        // Global error
+        console.error = function(...args) {
+            methods.error(...args);
+            addLog('error', args.join(' '));
+        };
+        
+        console.warn = function(...args) {
+            methods.warn(...args);
+            addLog('warn', args.join(' '));
+        };
+        
+        console.info = function(...args) {
+            methods.info(...args);
+            addLog('info', args.join(' '));
+        };
+        
+        // Global error handler
         window.addEventListener('error', (e) => {
-            stats.errors++;
-            stats.lastStatus = '💥 Runtime error: ' + e.message;
-            updateDebugUI();
+            addLog('error', '💥 RUNTIME ERROR: ' + e.message + ' at ' + e.filename + ':' + e.lineno);
         });
         
-        function updateDebugUI() {
-            // Request counts
-            document.getElementById('requestCount').textContent = 'Total: ' + stats.total + ' | Success: ' + stats.success;
-            document.getElementById('errorCount').textContent = 'Failed: ' + stats.errors;
+        window.addEventListener('unhandledrejection', (e) => {
+            addLog('error', '🔴 UNHANDLED PROMISE: ' + (e.reason || 'Unknown error'));
+        });
+        
+        function addLog(type, message) {
+            const time = new Date().toLocaleTimeString();
+            const timestamp = '[' + time + ']';
+            const fullMessage = timestamp + ' ' + message;
             
-            // Success list
-            const successList = document.getElementById('successList');
-            successList.innerHTML = '';
-            stats.requests.filter(r => r.type === 'success').slice(-5).forEach(r => {
-                const div = document.createElement('div');
-                div.className = 'debug-item debug-success';
-                div.textContent = '[' + r.status + '] ' + r.url;
-                successList.appendChild(div);
-            });
-            if (stats.requests.filter(r => r.type === 'success').length === 0) {
-                successList.innerHTML = '<div class="debug-item">None yet</div>';
+            consoleLogs.push({ type, message: fullMessage });
+            
+            const content = document.getElementById('consoleContent');
+            const line = document.createElement('div');
+            line.className = 'log-line ' + type;
+            line.innerHTML = '<span class="log-time">' + timestamp + '</span> <span class="console-' + type + '">' + escapeHtml(message) + '</span>';
+            content.appendChild(line);
+            content.scrollTop = content.scrollHeight;
+            
+            if (consoleLogs.length > 300) {
+                consoleLogs.shift();
+                content.removeChild(content.firstChild);
             }
-            
-            // Error list
-            const errorList = document.getElementById('errorList');
-            errorList.innerHTML = '';
-            stats.requests.filter(r => r.type === 'error').forEach(r => {
-                const div = document.createElement('div');
-                div.className = 'debug-item debug-error';
-                div.textContent = '[' + r.status + '] ' + r.url + (r.error ? ' - ' + r.error : '');
-                errorList.appendChild(div);
-            });
-            if (stats.requests.filter(r => r.type === 'error').length === 0) {
-                errorList.innerHTML = '<div class="debug-item">None</div>';
-            }
-            
-            // Last status
-            document.getElementById('lastStatus').textContent = stats.lastStatus;
         }
         
-        function showDebug() {
-            document.getElementById('debugOverlay').classList.add('show');
+        function escapeHtml(text) {
+            const map = {
+                '&': '&amp;',
+                '<': '&lt;',
+                '>': '&gt;',
+                '"': '&quot;',
+                "'": '&#039;'
+            };
+            return text.replace(/[&<>"']/g, m => map[m]);
         }
         
-        function closeDebug(e) {
-            if (!e || e.target.id === 'debugOverlay') {
-                document.getElementById('debugOverlay').classList.remove('show');
-            }
+        function showConsole() {
+            document.getElementById('consoleOverlay').classList.add('show');
+        }
+        
+        function closeConsole() {
+            document.getElementById('consoleOverlay').classList.remove('show');
         }
         
         // Load game
         window.addEventListener('load', () => {
-            stats.lastStatus = '🎮 Loading game from CDN...';
+            addLog('info', '🎮 Loading game from CDN...');
             document.getElementById('gameFrame').src = 'https://mon-jy-cdn.awawgame.com/monster_bt_foreign/monster_foreign_en_juyou_532_android_1.html';
-            updateDebugUI();
         });
     </script>
 </body>
 </html>`;
 
-// Routes
 app.get('/', (req, res) => {
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
-    res.send(SIMPLE_PAGE);
+    res.send(CONSOLE_PAGE);
 });
 
 app.get('/health', (req, res) => res.json({ status: 'ok' }));
